@@ -22,6 +22,8 @@ for prog in "${RAW_PROGRAMS[@]}"; do
     [[ -n "$prog" ]] && PROGRAMS+=("$prog")
 done
 
+echo $PROGRAMS
+
 echo "==== Checking status BEFORE restart ===="
 for prog in "${PROGRAMS[@]}"; do
     echo "--- $prog ---"
