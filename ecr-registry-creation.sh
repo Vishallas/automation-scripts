@@ -14,7 +14,7 @@ logging() {
     if [[  -n $log_file_path && -f $log_file_path]]
     then
         echo -e "$(date +"%Y-%m-%dT%H:%M:%S%z") | [$1]           | $2" >> $log_file_path
-    elif [[ -n $log_file_path && -n log_file_dir ]]
+    elif [[ -n $log_file_path && -n $log_file_dir ]]
         mkdir -p $log_file_dir
         touch $log_file_path
         echo -e "$(date +"%Y-%m-%dT%H:%M:%S%z") | [$1]           | $2" >> $log_file_path
