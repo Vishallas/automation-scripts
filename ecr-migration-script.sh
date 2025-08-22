@@ -119,7 +119,7 @@ migrate_mode() {
   
   region=$(echo "$ECR_REGISTRY" | cut -d'.' -f4)
   log INFO "Logging into AWS ECR..."
-#   aws ecr get-login-password --region "$region" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+  aws ecr get-login-password --region "$region" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
   log INFO "Starting migration using $MIGRATE_FILE"
   tail -n +2 "$MIGRATE_FILE" | while IFS=, read -r project repo digest push_time media_type tags platforms; do
@@ -135,7 +135,7 @@ migrate_mode() {
     [[ -z "$tags" ]] && { log ERROR "TAG Not Found for ${project}/${repo}@${digest}"; exit 1; }
     for tag in $(echo "$tags" | tr '|' ' '); do
       log INFO "Migrating from "$harbor_image" to  ${ecr_base}:${tag}"
-    #   oras copy $harbor_image "$ecr_base/$tags" --from-username $HARBOR_USER --from-password $HARBOR_PASS > /dev/null
+      oras copy $harbor_image "$ecr_base/$tags" --from-username $HARBOR_USER --from-password $HARBOR_PASS > /dev/null
     done
   done
 
