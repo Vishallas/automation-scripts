@@ -1,0 +1,48 @@
+#compdef cws
+
+_cws() {
+  local -a subcommands
+  subcommands=('start' 'stop' 'status' 'cache-refresh' 'info')
+  local -a flags
+  flags=('--name' '--ip')
+
+  local cache_file="/tmp/ec2_instance_cache.json"
+
+  local cur prev cmd
+  cur=${words[CURRENT]}
+  prev=${words[CURRENT-1]}
+  cmd=""
+
+  # Extract the subcommand (2nd word)
+  (( CURRENT >= 2 )) && cmd=${words[2]}
+
+  # Step 1: Suggest subcommands
+  if (( CURRENT == 2 )); then
+    compadd -- ${subcommands[@]}
+    return 0
+  fi
+
+  # Step 2: Suggest flags only for certain subcommands
+  if [[ "$prev" == "$cmd" && "$cmd" =~ ^(start|stop|status|info)$ ]]; then
+    compadd -- ${flags[@]}
+    return 0
+  fi
+
+  # Step 3: Suggest values for flags
+  if [[ -f "$cache_file" ]]; then
+    case "$prev" in
+      --name)
+        local -a names
+        names=("${(@f)$(jq -r '.[] | select(.name != null) | .name' "$cache_file" 2>/dev/null)}")
+        compadd -- ${names[@]}
+        return 0
+        ;;
+      --ip)
+        local -a ips
+        ips=("${(@f)$(jq -r '.[] | select(.private_ip != null) | .private_ip' "$cache_file" 2>/dev/null)}")
+        compadd -- ${ips[@]}
+        return 0
+        ;;
+    esac
+  fi
+}
