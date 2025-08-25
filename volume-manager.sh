@@ -1,88 +1,94 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# volume-manager.sh
+# Manage EBS volumes on EC2 (attach or extend)
+
 set -euo pipefail
 
-# --- Defaults (override via args) ---
-DEVICE=""
-MOUNT_POINT=""
-FS_TYPE=""  # Default for Docker-like workloads
-
 usage() {
-  cat <<EOF
-Usage: volume-manager.sh --device /dev/nvmeXnX --mount-point /path --fs-type type
-
-Options:
-  --device       Block device (e.g., /dev/nvme1n1). If omitted, auto-detected.
-  --mount-point  Directory to mount the volume (default: /mnt/new_volume)
-  --fs-type      Filesystem type, e.g. xfs or ext4
-  -h|--help      Show this message
-EOF
+  echo "Usage:"
+  echo "  $0 --mode attach --device <device> --mount-point <path> --fs-type <ext4|xfs>"
+  echo "  $0 --mode extend --device <device>"
+  exit 1
 }
 
-# --- Parse args ---
-while [ $# -gt 0 ]; do
+MODE=""
+DEVICE=""
+MOUNT_POINT=""
+FS_TYPE=""
+
+while [[ $# -gt 0 ]]; do
   case "$1" in
+    --mode) MODE="$2"; shift 2 ;;
     --device) DEVICE="$2"; shift 2 ;;
     --mount-point) MOUNT_POINT="$2"; shift 2 ;;
     --fs-type) FS_TYPE="$2"; shift 2 ;;
-    -h|--help) usage; exit 0 ;;
-    *) echo "Unknown argument: $1"; usage; exit 1 ;;
+    *) echo "Unknown option: $1"; usage ;;
   esac
 done
 
-for v in DEVICE MOUNT_POINT FS_TYPE; do
-  if [[ -z "${!v:-}" ]]; then
-    echo "ERROR: Missing required arg: $v" >&2
-    usage; exit 1
+if [[ -z "$MODE" || -z "$DEVICE" ]]; then
+  usage
+fi
+
+extend_volume() {
+  echo "[INFO] Extending volume on $DEVICE"
+
+  # Auto-detect fs-type
+  FS_TYPE=$(lsblk -no FSTYPE "$DEVICE" | head -n1)
+  if [[ -z "$FS_TYPE" ]]; then
+    FS_TYPE=$(blkid -o value -s TYPE "$DEVICE" || true)
   fi
-done
-
-# --- CHECK DEVICE EXISTS ---
-if [ ! -b "$DEVICE" ]; then
-  echo "[ERROR] Block device $DEVICE not found. Run 'lsblk' to verify."
-  exit 1
-fi
-
-# --- INSTALL REQUIRED TOOLS ---
-if ! command -v mkfs.$FS_TYPE >/dev/null 2>&1; then
-  echo "[INFO] Installing $FS_TYPE tools..."
-  if [ -f /etc/debian_version ]; then
-    sudo apt-get update -y && sudo apt-get install -y xfsprogs
-  elif [ -f /etc/redhat-release ]; then
-    sudo yum install -y xfsprogs
+  if [[ -z "$FS_TYPE" ]]; then
+    echo "[ERROR] Could not detect filesystem type on $DEVICE"
+    exit 1
   fi
-fi
+  echo "[INFO] Filesystem type: $FS_TYPE"
 
-# --- FORMAT IF NEEDED ---
-if blkid "$DEVICE" >/dev/null 2>&1; then
-  echo "[WARN] $DEVICE already has a filesystem. Skipping mkfs."
-else
-  echo "[INFO] Creating $FS_TYPE filesystem on $DEVICE..."
-  sudo mkfs.$FS_TYPE -f "$DEVICE"
-fi
+  # Auto-detect mount point
+  MOUNT_POINT=$(findmnt -n -o TARGET --source "$DEVICE" || true)
+  if [[ -z "$MOUNT_POINT" ]]; then
+    echo "[ERROR] Could not detect mount point for $DEVICE"
+    exit 1
+  fi
+  echo "[INFO] Mount point: $MOUNT_POINT"
 
-# --- CREATE MOUNT DIRECTORY ---
-sudo mkdir -p "$MOUNT_POINT"
+  # Grow FS
+  case "$FS_TYPE" in
+    xfs) xfs_growfs "$MOUNT_POINT" ;;
+    ext4) resize2fs "$DEVICE" ;;
+    *) echo "[ERROR] Unsupported filesystem: $FS_TYPE"; exit 1 ;;
+  esac
 
-# --- GET UUID OF DEVICE ---
-UUID=$(sudo blkid -s UUID -o value "$DEVICE")
+  echo "[SUCCESS] Extended $DEVICE ($FS_TYPE) mounted at $MOUNT_POINT"
+}
 
-# --- BACKUP FSTAB ---
-sudo cp /etc/fstab /etc/fstab.bak.$(date +%F_%H%M%S)
+attach_volume() {
+  if [[ -z "$MOUNT_POINT" || -z "$FS_TYPE" ]]; then
+    echo "[ERROR] attach mode requires --mount-point and --fs-type"
+    usage
+  fi
 
-# --- ADD TO FSTAB IF NOT EXISTS ---
-if grep -q "$UUID" /etc/fstab; then
-  echo "[INFO] UUID already present in /etc/fstab"
-else
-  echo "[INFO] Adding fstab entry..."
-  echo "UUID=$UUID  $MOUNT_POINT  $FS_TYPE  defaults,nofail  0  2" | sudo tee -a /etc/fstab
-fi
+  echo "[INFO] Formatting $DEVICE as $FS_TYPE"
+  case "$FS_TYPE" in
+    xfs) mkfs.xfs -f "$DEVICE" ;;
+    ext4) mkfs.ext4 -F "$DEVICE" ;;
+    *) echo "[ERROR] Unsupported filesystem: $FS_TYPE"; exit 1 ;;
+  esac
 
-# --- MOUNT AND VERIFY ---
-sudo mount -a
+  mkdir -p "$MOUNT_POINT"
 
-if df -hT | grep -q "$MOUNT_POINT"; then
-  echo "[SUCCESS] $DEVICE mounted on $MOUNT_POINT and persisted in /etc/fstab"
-else
-  echo "[ERROR] Mount verification failed."
-  exit 1
-fi
+  echo "[INFO] Mounting $DEVICE at $MOUNT_POINT"
+  mount "$DEVICE" "$MOUNT_POINT"
+
+  echo "[INFO] Adding fstab entry"
+  UUID=$(blkid -s UUID -o value "$DEVICE")
+  echo "UUID=$UUID $MOUNT_POINT $FS_TYPE defaults,nofail 0 2" >> /etc/fstab
+
+  echo "[SUCCESS] $DEVICE mounted at $MOUNT_POINT with fstab persistence"
+}
+
+case "$MODE" in
+  attach) attach_volume ;;
+  extend) extend_volume ;;
+  *) echo "[ERROR] Unknown mode: $MODE"; usage ;;
+esac
