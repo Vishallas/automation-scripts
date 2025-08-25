@@ -1,38 +1,40 @@
 #!/bin/bash
 set -euo pipefail
 
-
-usage () {
-	cat <<'EOF'
-Usage : volume-manager.sh --device <device>  --mount-point <mount-point> --fs-type <filesystem>
-
-Required: 
-
-	--device          Device which have to be mounted to ( eg. /dev/nvme1n1 )
-	--mount-point     Directory to which the volume has to be attached ( eg. /data )
-	--fs-type         Filesystem Type for the mount point  ( eg. xfs )
-
-Optional:
-	
-	-h | --help       Help
-EOF
-
-
-# --- CONFIGURATION ---
-DEVICE=""          
+# --- Defaults (override via args) ---
+DEVICE=""
 MOUNT_POINT=""
-FS_TYPE=""                   # Use xfs for Docker workloads
+FS_TYPE=""  # Default for Docker-like workloads
 
-while [[ $# -gt 0 ]]; do
-	case "$1" in 
-		--device)  DEVICE="$2"; shift 2 ;;
-		--mount-point) MOUNT_POINT="$2"; shift 2 ;;
-		--fs-type) FS_TYPE="$2"; shift 2 ;;
-		-h|--help) usage ;;
-		*) echo "Unknow arg: $1"; usage; exit 1 ;;
-	easc
+usage() {
+  cat <<EOF
+Usage: volume-manager.sh --device /dev/nvmeXnX --mount-point /path --fs-type type
+
+Options:
+  --device       Block device (e.g., /dev/nvme1n1). If omitted, auto-detected.
+  --mount-point  Directory to mount the volume (default: /mnt/new_volume)
+  --fs-type      Filesystem type, e.g. xfs or ext4
+  -h|--help      Show this message
+EOF
+}
+
+# --- Parse args ---
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --device) DEVICE="$2"; shift 2 ;;
+    --mount-point) MOUNT_POINT="$2"; shift 2 ;;
+    --fs-type) FS_TYPE="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown argument: $1"; usage; exit 1 ;;
+  esac
 done
 
+for v in DEVICE MOUNT_POINT FS_TYPE; do
+  if [[ -z "${!v:-}" ]]; then
+    echo "ERROR: Missing required arg: $v" >&2
+    usage; exit 1
+  fi
+done
 
 # --- CHECK DEVICE EXISTS ---
 if [ ! -b "$DEVICE" ]; then
