@@ -66,8 +66,8 @@ while read -r REPO_NAME; do
   # Step 1: Create repo with IMMUTABLE mode
   aws ecr create-repository \
     --repository-name "$REPO_NAME" \
-    --image-tag-mutability IMMUTABLE \
-    --encryption-configuration encryptionType=AES256 \
+    --image-tag-mutability IMMUTABLE_WITH_EXCLUSION \
+    --image-tag-mutability-exclusion-filters "filterType=WILDCARD,filter=latest" \
     --region "$AWS_REGION" \
     >/dev/null
   
