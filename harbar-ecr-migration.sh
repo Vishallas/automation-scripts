@@ -16,14 +16,14 @@ usage() {
 
 Required (discovery mode):
 
-Usage: harbar-ecr-migration.sh --project <project> --token <token>
+Usage: harbor-tool.sh --project <project> --token <token>
 
   --project       Harbor project name
   --token         Harbor base64 token (user:pass -> base64)
 
 Required (migration mode):
 
-Usage: harbar-ecr-migration.sh --migrate-from <file.csv> --harbar-user <username> ----harbor-pass <password> --ecr <ecr-registry-prefix>
+Usage: harbor-tool.sh --migrate-from <file.csv> --harbar-user <username> ----harbor-pass <password> --ecr <ecr-registry-prefix>
 
   --migrate-from  CSV file produced by discovery (enables migration mode)
   --harbar-user   Harbor Username to pull the images
@@ -52,10 +52,12 @@ ECR_REGISTRY=""
 HARBOR_USER=""
 HARBOR_PASS=""
 HARBOR_API="${HARBOR_API:-$HARBOR_HOST/api/v2.0}"
+DRY_RUN=0
 
 # ---------- Parse args ----------
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --dry-run)      DRY_RUN=1; shift 1;;
     --project)      PROJECT="$2"; shift 2 ;;
     --token)        HARBOR_TOKEN="$2"; shift 2 ;;
     --artifacts)    ARTIFACTS_PER_REPO="$2"; shift 2 ;;
@@ -94,6 +96,7 @@ discover_mode() {
 
   for repo_with_project in $repos; do
     IFS='/' read -r project repo <<< "$repo_with_project"
+    repo="${repo//\//%252F}"
     log INFO "Processing repo: ${repo}"
     API "projects/${PROJECT}/repositories/${repo}/artifacts?with_tag=true&sort=-push_time&page=1&page_size=${ARTIFACTS_PER_REPO}" \
     | jq -c --arg repo "$repo" --arg project "$PROJECT" \
@@ -122,8 +125,10 @@ migrate_mode() {
   [[ -z "$ECR_REGISTRY" ]] && { log ERROR "ECR registry/region required"; exit 1; }
   
   region=$(echo "$ECR_REGISTRY" | cut -d'.' -f4)
-  log INFO "Logging into AWS ECR..."
-#   aws ecr get-login-password --region "$region" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+  if [[ "$DRY_RUN" == "0" ]]; then
+     log INFO "Logging into AWS ECR..."
+     aws ecr get-login-password --region "$region" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+  fi
 
   log INFO "Starting migration using $MIGRATE_FILE"
   tail -n +2 "$MIGRATE_FILE" | while IFS=, read -r project repo digest push_time media_type tags platforms; do
@@ -139,7 +144,10 @@ migrate_mode() {
     [[ -z "$tags" ]] && { log ERROR "TAG Not Found for ${project}/${repo}@${digest}"; exit 1; }
     for tag in $(echo "$tags" | tr '|' ' '); do
       log INFO "Migrating from "$harbor_image" to  ${ecr_base}:${tag}"
-    #   oras copy $harbor_image "$ecr_base/$tags" --from-username $HARBOR_USER --from-password $HARBOR_PASS > /dev/null
+      if [[ "$DRY_RUN" == "0" ]]; then
+	 #echo "Not Dry Run"
+         oras copy $harbor_image "$ecr_base:$tag" --from-username $HARBOR_USER --from-password $HARBOR_PASS > /dev/null
+      fi
     done
   done
 
